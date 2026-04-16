@@ -3,6 +3,8 @@ import {
   calculateEstimate,
   calculatePert,
   cycleFamiliarity,
+  normalizeNumericDraft,
+  parseNumericDraft,
   sanitizeNumber,
   type BaseSettings,
   type Task,
@@ -56,5 +58,18 @@ describe("calculator logic", () => {
     expect(sanitizeNumber(Number.NaN)).toBe(0);
     expect(sanitizeNumber(-12)).toBe(0);
     expect(sanitizeNumber(150, { min: 0, max: 100 })).toBe(100);
+  });
+
+  it("parses empty drafts as zero for calculations", () => {
+    expect(parseNumericDraft("")).toBe(0);
+    expect(parseNumericDraft("   ")).toBe(0);
+    expect(parseNumericDraft("", { min: 0, max: 100 })).toBe(0);
+  });
+
+  it("normalizes drafts while preserving empty strings visually", () => {
+    expect(normalizeNumericDraft("")).toBe("");
+    expect(normalizeNumericDraft("2000")).toBe("2000");
+    expect(normalizeNumericDraft("3.5")).toBe("3.5");
+    expect(normalizeNumericDraft("120", { min: 0, max: 100 })).toBe("100");
   });
 });

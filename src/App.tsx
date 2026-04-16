@@ -5,7 +5,8 @@ import {
   calculateTaskPert,
   createTask,
   cycleFamiliarity,
-  sanitizeNumber,
+  normalizeNumericDraft,
+  parseNumericDraft,
   seedSettings,
   seedTasks,
   type BaseSettings,
@@ -15,6 +16,13 @@ import {
 function App() {
   const [tasks, setTasks] = useState<Task[]>(seedTasks);
   const [settings, setSettings] = useState<BaseSettings>(seedSettings);
+  const [settingDrafts, setSettingDrafts] = useState<Record<keyof BaseSettings, string>>({
+    hourlyRate: String(seedSettings.hourlyRate),
+    bufferRisk: String(seedSettings.bufferRisk),
+  });
+  const [taskHourDrafts, setTaskHourDrafts] = useState<
+    Record<string, Record<HourFieldName, string>>
+  >(() => createTaskHourDrafts(seedTasks));
 
   const summary = useMemo(
     () => calculateEstimate(tasks, settings),
@@ -60,10 +68,17 @@ function App() {
 
   const updateTaskHours = (
     taskId: string,
-    field: "optimisticHours" | "realisticHours" | "pessimisticHours",
+    field: HourFieldName,
     rawValue: string,
   ) => {
-    const nextValue = sanitizeNumber(Number.parseFloat(rawValue));
+    const nextValue = parseNumericDraft(rawValue, { min: 0 });
+    setTaskHourDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [taskId]: {
+        ...currentDrafts[taskId],
+        [field]: rawValue,
+      },
+    }));
     setTasks((currentTasks) =>
       currentTasks.map((task) =>
         task.id === taskId ? { ...task, [field]: nextValue } : task,
@@ -71,24 +86,60 @@ function App() {
     );
   };
 
+  const normalizeTaskHours = (taskId: string, field: HourFieldName) => {
+    setTaskHourDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [taskId]: {
+        ...currentDrafts[taskId],
+        [field]: normalizeNumericDraft(currentDrafts[taskId]?.[field] ?? "", {
+          min: 0,
+        }),
+      },
+    }));
+  };
+
   const updateSetting = (
     field: keyof BaseSettings,
     rawValue: string,
     options?: { min?: number; max?: number },
   ) => {
-    const nextValue = sanitizeNumber(Number.parseFloat(rawValue), options);
+    const nextValue = parseNumericDraft(rawValue, options);
+    setSettingDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [field]: rawValue,
+    }));
     setSettings((currentSettings) => ({
       ...currentSettings,
       [field]: nextValue,
     }));
   };
 
+  const normalizeSetting = (
+    field: keyof BaseSettings,
+    options?: { min?: number; max?: number },
+  ) => {
+    setSettingDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [field]: normalizeNumericDraft(currentDrafts[field], options),
+    }));
+  };
+
   const addTask = () => {
-    setTasks((currentTasks) => [...currentTasks, createTask()]);
+    const newTask = createTask();
+    setTasks((currentTasks) => [...currentTasks, newTask]);
+    setTaskHourDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [newTask.id]: createTaskDraftRecord(newTask),
+    }));
   };
 
   const removeTask = (taskId: string) => {
     setTasks((currentTasks) => currentTasks.filter((task) => task.id !== taskId));
+    setTaskHourDrafts((currentDrafts) => {
+      const nextDrafts = { ...currentDrafts };
+      delete nextDrafts[taskId];
+      return nextDrafts;
+    });
   };
 
   const rotateFamiliarity = (taskId: string) => {
@@ -136,17 +187,21 @@ function App() {
               <div className="grid grid-cols-2 gap-2 px-2">
                 <ParameterCard
                   label="HOURLY RATE"
-                  value={settings.hourlyRate}
+                  value={settingDrafts.hourlyRate}
                   onChange={(value) =>
                     updateSetting("hourlyRate", value, { min: 0 })
                   }
+                  onBlur={() => normalizeSetting("hourlyRate", { min: 0 })}
                 />
                 <ParameterCard
                   label="BUFFER RISK"
-                  value={settings.bufferRisk}
+                  value={settingDrafts.bufferRisk}
                   prefix="%"
                   onChange={(value) =>
                     updateSetting("bufferRisk", value, { min: 0, max: 100 })
+                  }
+                  onBlur={() =>
+                    normalizeSetting("bufferRisk", { min: 0, max: 100 })
                   }
                 />
               </div>
@@ -179,9 +234,11 @@ function App() {
                     onDelete={() => removeTask(task.id)}
                     onCycleFamiliarity={() => rotateFamiliarity(task.id)}
                     onTitleChange={(value) => updateTaskTitle(task.id, value)}
+                    hourDrafts={taskHourDrafts[task.id] ?? createTaskDraftRecord(task)}
                     onHoursChange={(field, value) =>
                       updateTaskHours(task.id, field, value)
                     }
+                    onHoursBlur={(field) => normalizeTaskHours(task.id, field)}
                   />
                 ))}
               </div>
@@ -215,11 +272,13 @@ function ParameterCard({
   value,
   prefix,
   onChange,
+  onBlur,
 }: {
   label: string;
-  value: number;
+  value: string;
   prefix?: string;
   onChange: (value: string) => void;
+  onBlur: () => void;
 }) {
   return (
     <div className="rounded-[12px] bg-[rgba(226,227,225,0.5)] p-4">
@@ -239,6 +298,7 @@ function ParameterCard({
           step={1}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          onBlur={onBlur}
           className="font-heading min-w-0 flex-1 bg-transparent text-[24px] font-extrabold leading-8 text-[#2d2f2e] outline-none"
           aria-label={label}
         />
@@ -252,16 +312,17 @@ function TaskCard({
   onDelete,
   onCycleFamiliarity,
   onTitleChange,
+  hourDrafts,
   onHoursChange,
+  onHoursBlur,
 }: {
   task: Task;
   onDelete: () => void;
   onCycleFamiliarity: () => void;
   onTitleChange: (value: string) => void;
-  onHoursChange: (
-    field: "optimisticHours" | "realisticHours" | "pessimisticHours",
-    value: string,
-  ) => void;
+  hourDrafts: Record<HourFieldName, string>;
+  onHoursChange: (field: HourFieldName, value: string) => void;
+  onHoursBlur: (field: HourFieldName) => void;
 }) {
   return (
     <article className="rounded-[12px] bg-[#f0f1ef] p-5">
@@ -288,18 +349,21 @@ function TaskCard({
       <div className="mt-4 grid grid-cols-3 gap-3">
         <HoursField
           label="OPTIMISTIC"
-          value={task.optimisticHours}
+          value={hourDrafts.optimisticHours}
           onChange={(value) => onHoursChange("optimisticHours", value)}
+          onBlur={() => onHoursBlur("optimisticHours")}
         />
         <HoursField
           label="REALISTIC"
-          value={task.realisticHours}
+          value={hourDrafts.realisticHours}
           onChange={(value) => onHoursChange("realisticHours", value)}
+          onBlur={() => onHoursBlur("realisticHours")}
         />
         <HoursField
           label="PESSIMISTIC"
-          value={task.pessimisticHours}
+          value={hourDrafts.pessimisticHours}
           onChange={(value) => onHoursChange("pessimisticHours", value)}
+          onBlur={() => onHoursBlur("pessimisticHours")}
         />
       </div>
 
@@ -331,10 +395,12 @@ function HoursField({
   label,
   value,
   onChange,
+  onBlur,
 }: {
   label: string;
-  value: number;
+  value: string;
   onChange: (value: string) => void;
+  onBlur: () => void;
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -348,6 +414,7 @@ function HoursField({
           step={0.5}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          onBlur={onBlur}
           aria-label={label}
           className="font-heading min-w-0 flex-1 bg-transparent text-[14px] font-bold leading-5 text-[#2d2f2e] outline-none"
         />
@@ -407,6 +474,25 @@ function formatHours(value: number): string {
     : rounded.toFixed(1);
 
   return `${formatted}h`;
+}
+
+type HourFieldName =
+  | "optimisticHours"
+  | "realisticHours"
+  | "pessimisticHours";
+
+function createTaskHourDrafts(tasks: Task[]) {
+  return Object.fromEntries(
+    tasks.map((task) => [task.id, createTaskDraftRecord(task)]),
+  ) as Record<string, Record<HourFieldName, string>>;
+}
+
+function createTaskDraftRecord(task: Task): Record<HourFieldName, string> {
+  return {
+    optimisticHours: String(task.optimisticHours),
+    realisticHours: String(task.realisticHours),
+    pessimisticHours: String(task.pessimisticHours),
+  };
 }
 
 function SettingsIcon() {

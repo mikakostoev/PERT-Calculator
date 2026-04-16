@@ -91,6 +91,28 @@ export function sanitizeNumber(
   return Math.min(Math.max(value, min), max);
 }
 
+export function parseNumericDraft(
+  rawValue: string,
+  options: { min?: number; max?: number } = {},
+): number {
+  if (rawValue.trim() === "") {
+    return sanitizeNumber(0, options);
+  }
+
+  return sanitizeNumber(Number.parseFloat(rawValue), options);
+}
+
+export function normalizeNumericDraft(
+  rawValue: string,
+  options: { min?: number; max?: number } = {},
+): string {
+  if (rawValue.trim() === "") {
+    return "";
+  }
+
+  return String(parseNumericDraft(rawValue, options));
+}
+
 export function calculatePert(
   optimisticHours: number,
   realisticHours: number,
