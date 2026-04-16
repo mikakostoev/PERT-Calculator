@@ -1,9 +1,5 @@
 # PERT Calculator
 
-## Small Description
-
-PERT Calculator is a compact desktop app for estimating project cost with PERT ranges, a risk buffer, and familiarity modes in a focused mobile-sized window.
-
 ## How It Works
 
 The app calculates project estimates using the PERT method:
